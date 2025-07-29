@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CMS Whiteboard</title>
+  <style>
+    html, body { margin:0; padding:0; overflow:hidden; font-family:sans-serif; background:#fafafa; }
+    canvas { position:absolute; top:0; left:0; }
+    .toolbar { position:absolute; bottom:0; width:100%; height:50px; background:#fff; border-top:1px solid #ddd; display:flex; justify-content:space-around; align-items:center; z-index:10; }
+    .tool-btn { background:none; border:none; cursor:pointer; width:40px; height:40px; }
+    .tool-btn img { width:100%; height:100%; object-fit:contain; }
+    .panel { position:absolute; bottom:55px; background:#fff; border-radius:8px; padding:10px; box-shadow:0 2px 6px rgba(0,0,0,0.2); display:none; flex-direction:column; gap:8px; z-index:11; }
+    .color-picker { display:flex; gap:6px; }
+    .color-circle { width:20px; height:20px; border-radius:50%; border:1px solid #ccc; cursor:pointer; }
+    .size-slider { width:120px; }
+    .size-preview { width:20px; height:20px; border-radius:50%; background:black; }
+    #eraserCircle { position:absolute; pointer-events:none; border-radius:50%; border:1px solid #aaa; background:rgba(0,0,0,0.1); display:none; z-index:5; }
+    .pen-type-selector { display:flex; gap:4px; }
+    .pen-type-selector button { font-size:11px; padding:4px 6px; }
+    #uploadPanel { width:220px; }
+    #uploadPanel input { width:150px; padding:4px; }
+    #imageResults { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; max-height:150px; overflow-y:auto; margin-top:5px; }
+    .image-result { width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd; cursor:pointer; }
+    .image-result:hover { border-color:black; }
+    .selected-outline { outline:2px dashed red; }
+  </style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+<div id="eraserCircle"></div>
+
+<!-- Pen Panel -->
+<div class="panel" id="penPanel">
+  <div class="color-picker">
+    <div class="color-circle" style="background:red" data-color="red"></div>
+    <div class="color-circle" style="background:green" data-color="green"></div>
+    <div class="color-circle" style="background:blue" data-color="blue"></div>
+    <div class="color-circle" style="background:black" data-color="black"></div>
+  </div>
+  <input type="range" id="penSizeSlider" class="size-slider" min="1" max="30" value="5"/>
+  <div class="size-preview" id="penPreview"></div>
+  <div class="pen-type-selector">
+    <button data-pen="fountain">Fountain</button>
+    <button data-pen="pencil">Pencil</button>
+    <button data-pen="highlighter">Highlighter</button>
+  </div>
+</div>
+
+<!-- Eraser Panel -->
+<div class="panel" id="eraserPanel">
+  <input type="range" id="eraserSizeSlider" class="size-slider" min="10" max="100" value="30"/>
+  <div class="size-preview" id="eraserPreview"></div>
+</div>
+
+<!-- Upload Panel -->
+<div class="panel" id="uploadPanel">
+  <input type="text" id="searchQuery" placeholder="Search image"/>
+  <button id="searchImageBtn">Search</button>
+  <div id="imageResults"></div>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <button class="tool-btn" id="penBtn"><img src="pen.png" alt="Pen"></button>
+  <button class="tool-btn" id="eraserBtn"><img src="eraser.png" alt="Eraser"></button>
+  <button class="tool-btn" id="selectBtn"><img src="selection.png" alt="Select"></button>
+  <button class="tool-btn" id="uploadBtn"><img src="upload.png" alt="Upload"></button>
+  <button class="tool-btn" id="undoBtn"><img src="undo.png" alt="Undo"></button>
+  <button class="tool-btn" id="redoBtn"><img src="redo.png" alt="Redo"></button>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas"), ctx = canvas.getContext("2d");
+let w=canvas.width=window.innerWidth, h=canvas.height=window.innerHeight;
+
+let drawing=false, currentTool='pen', penColor='black', penSize=5, eraserSize=30, penType='fountain';
+let strokes=[], currentStroke=null, history=[], redoStack=[];
+let selectedStroke=null, isMoving=false, lastPos=null;
+
+const penPanel=document.getElementById('penPanel'),
+      eraserPanel=document.getElementById('eraserPanel'),
+      uploadPanel=document.getElementById('uploadPanel'),
+      eraserCircle=document.getElementById('eraserCircle'),
+      penPreview=document.getElementById('penPreview'),
+      eraserPreview=document.getElementById('eraserPreview'),
+      imageResults=document.getElementById('imageResults');
+
+function saveState(){ history.push(JSON.stringify(strokes)); redoStack=[]; }
+function redraw(){
+  ctx.clearRect(0,0,w,h);
+  strokes.forEach((stroke,index)=>{
+    ctx.strokeStyle=stroke.color;
+    ctx.lineWidth=stroke.size;
+    ctx.globalAlpha=(stroke.type==='pencil')?0.5:(stroke.type==='highlighter'?0.3:1);
+    ctx.beginPath();
+    for(let i=1;i<stroke.points.length;i++){
+      ctx.moveTo(stroke.points[i-1].x,stroke.points[i-1].y);
+      ctx.lineTo(stroke.points[i].x,stroke.points[i].y);
+    }
+    ctx.stroke();
+    ctx.closePath();
+  });
+}
+
+function getPos(e){ const r=canvas.getBoundingClientRect(); const x=(e.touches?e.touches[0].clientX:e.clientX)-r.left; const y=(e.touches?e.touches[0].clientY:e.clientY)-r.top; return {x,y}; }
+
+function startDraw(e){
+  e.preventDefault();
+  const pos=getPos(e);
+  if(currentTool==='pen'){
+    drawing=true;
+    currentStroke={color:penColor,size:penSize,type:penType,points:[pos]};
+    strokes.push(currentStroke);
+  }
+  else if(currentTool==='eraser'){
+    drawing=true;
+  }
+  else if(currentTool==='select'){
+    selectedStroke=findStrokeAt(pos);
+    if(selectedStroke){
+      isMoving=true;
+      lastPos=pos;
+    }
+  }
+}
+
+function draw(e){
+  if(!drawing && !isMoving) return;
+  const pos=getPos(e);
+
+  if(currentTool==='pen' && drawing){
+    currentStroke.points.push(pos);
+    redraw();
+  }
+  else if(currentTool==='eraser' && drawing){
+    ctx.clearRect(pos.x-eraserSize/2,pos.y-eraserSize/2,eraserSize,eraserSize);
+    eraserCircle.style.left=(pos.x-eraserSize/2)+'px';
+    eraserCircle.style.top=(pos.y-eraserSize/2)+'px';
+    eraserCircle.style.width=eraserSize+'px';
+    eraserCircle.style.height=eraserSize+'px';
+    eraserCircle.style.display='block';
+  }
+  else if(currentTool==='select' && isMoving && selectedStroke){
+    const dx=pos.x-lastPos.x;
+    const dy=pos.y-lastPos.y;
+    selectedStroke.points.forEach(p=>{p.x+=dx;p.y+=dy;});
+    lastPos=pos;
+    redraw();
+  }
+}
+
+function endDraw(){
+  if(currentTool==='pen' && drawing){ saveState(); }
+  if(currentTool==='eraser' && drawing){ eraserCircle.style.display='none'; saveState(); }
+  if(currentTool==='select' && isMoving){ saveState(); }
+  drawing=false; isMoving=false;
+}
+
+function findStrokeAt(pos){
+  for(let i=strokes.length-1;i>=0;i--){
+    const stroke=strokes[i];
+    for(let p of stroke.points){
+      const dx=pos.x-p.x, dy=pos.y-p.y;
+      if(Math.sqrt(dx*dx+dy*dy)<10) return stroke;
+    }
+  }
+  return null;
+}
+
+function togglePanel(panel){ penPanel.style.display=eraserPanel.style.display=uploadPanel.style.display='none'; if(panel) panel.style.display=panel.style.display==='flex'?'none':'flex'; }
+
+document.getElementById('penBtn').onclick=()=>{togglePanel(penPanel);currentTool='pen';};
+document.getElementById('eraserBtn').onclick=()=>{togglePanel(eraserPanel);currentTool='eraser';};
+document.getElementById('selectBtn').onclick=()=>{togglePanel(null);currentTool='select';};
+document.getElementById('uploadBtn').onclick=()=>togglePanel(uploadPanel);
+document.getElementById('undoBtn').onclick=()=>{if(history.length){redoStack.push(JSON.stringify(strokes));strokes=JSON.parse(history.pop());redraw();}};
+document.getElementById('redoBtn').onclick=()=>{if(redoStack.length){history.push(JSON.stringify(strokes));strokes=JSON.parse(redoStack.pop());redraw();}};
+
+document.querySelectorAll('.color-circle').forEach(c=>c.onclick=()=>{penColor=c.dataset.color;penPreview.style.background=penColor;});
+document.getElementById('penSizeSlider').oninput=()=>{penSize=+penSizeSlider.value;penPreview.style.width=penPreview.style.height=penSize+'px';};
+document.getElementById('eraserSizeSlider').oninput=()=>{eraserSize=+eraserSizeSlider.value;eraserPreview.style.width=eraserPreview.style.height=eraserSize+'px';};
+document.querySelectorAll('.pen-type-selector button').forEach(b=>b.onclick=()=>penType=b.dataset.pen);
+
+// UNSPLASH IMAGE SEARCH
+const UNSPLASH_KEY="vBK_68HVaDjMYfHLZ3hz9qCjtt2y_37tr1SDPG1uz6s";
+document.getElementById('searchImageBtn').onclick=()=>{
+  const query=document.getElementById('searchQuery').value.trim();
+  if(!query) return;
+  imageResults.innerHTML='Loading...';
+  fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=9&client_id=${UNSPLASH_KEY}`)
+    .then(res=>res.json())
+    .then(data=>{
+      imageResults.innerHTML='';
+      if(data.results && data.results.length){
+        data.results.forEach(r=>{
+          const img=document.createElement('img');
+          img.src=r.urls.thumb;
+          img.className='image-result';
+          img.onclick=()=>{
+            const image=new Image();
+            image.crossOrigin='anonymous';
+            image.onload=()=>{ctx.drawImage(image,50,50,image.width/2,image.height/2);saveState();};
+            image.src=r.urls.full;
+          };
+          imageResults.appendChild(img);
+        });
+      } else {
+        imageResults.innerHTML='No images found';
+      }
+    })
+    .catch(()=>imageResults.innerHTML='Error loading images');
+};
+
+canvas.addEventListener('mousedown',startDraw);
+canvas.addEventListener('mousemove',draw);
+canvas.addEventListener('mouseup',endDraw);
+canvas.addEventListener('touchstart',startDraw);
+canvas.addEventListener('touchmove',draw);
+canvas.addEventListener('touchend',endDraw);
+window.addEventListener('resize',()=>{w=canvas.width=window.innerWidth;h=canvas.height=window.innerHeight;});
+
+saveState();
+</script>
+</body>
+</html>

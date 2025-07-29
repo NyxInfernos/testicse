@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Login | Whiteboard</title>
+  <style>
+    body { margin:0; font-family:sans-serif; background:#f4f4f4; display:flex; justify-content:center; align-items:center; height:100vh; }
+    #loginContainer { background:#fff; padding:20px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.2); text-align:center; width:280px; }
+    input { width:90%; padding:10px; margin:8px 0; border:1px solid #ddd; border-radius:4px; }
+    button { width:95%; padding:10px; background:#4CAF50; color:white; border:none; border-radius:4px; cursor:pointer; margin-top:5px; }
+    button:hover { background:#45a049; }
+    #error { color:red; font-size:14px; }
+    .switch { margin-top:10px; color:blue; cursor:pointer; text-decoration:underline; }
+  </style>
+</head>
+<body>
+
+<div id="loginContainer">
+  <h2 id="formTitle">Login</h2>
+  <input type="text" id="username" placeholder="Username">
+  <br>
+  <input type="password" id="password" placeholder="Password">
+  <br>
+  <button id="loginBtn">Login</button>
+  <button id="createBtn" style="display:none;">Create Account</button>
+  <p id="error"></p>
+  <p class="switch" id="switchMode">Create an account</p>
+</div>
+
+<script>
+const apiURL = "http://localhost:3000";
+const usernameInput = document.getElementById("username");
+const passwordInput = document.getElementById("password");
+const loginBtn = document.getElementById("loginBtn");
+const createBtn = document.getElementById("createBtn");
+const errorEl = document.getElementById("error");
+const switchMode = document.getElementById("switchMode");
+const formTitle = document.getElementById("formTitle");
+
+let createMode = false;
+
+// Switch between login & create account
+switchMode.addEventListener("click", () => {
+  createMode = !createMode;
+  if (createMode) {
+    formTitle.textContent = "Create Account";
+    loginBtn.style.display = "none";
+    createBtn.style.display = "block";
+    switchMode.textContent = "Already have an account? Login";
+  } else {
+    formTitle.textContent = "Login";
+    loginBtn.style.display = "block";
+    createBtn.style.display = "none";
+    switchMode.textContent = "Create an account";
+  }
+});
+
+// Login
+loginBtn.addEventListener("click", async () => {
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value.trim();
+
+  const res = await fetch(`${apiURL}/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password })
+  });
+
+  if (res.ok) {
+    localStorage.setItem("loggedInUser", username);
+    window.location.href = "whiteboard.html";
+  } else {
+    const data = await res.json();
+    errorEl.textContent = data.error;
+  }
+});
+
+// Create Account
+createBtn.addEventListener("click", async () => {
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value.trim();
+
+  const res = await fetch(`${apiURL}/create-user`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password })
+  });
+
+  const data = await res.json();
+  if (res.ok) {
+    errorEl.style.color = "green";
+    errorEl.textContent = data.message;
+    switchMode.click();
+  } else {
+    errorEl.style.color = "red";
+    errorEl.textContent = data.error;
+  }
+});
+</script>
+</body>
+</html>
